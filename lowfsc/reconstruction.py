@@ -5,6 +5,7 @@ import numpy as truenp
 from prysm.mathops import np
 
 
+# some utilities here, declaration order is relevant in python
 def prepare_Zmm(zernike_chops, flux_mode=None, shear_chops=None, mask=None):
     """Assemble Zmm from chop images.
 
@@ -128,8 +129,122 @@ def vmag_normalize(Zmm_old, old_ref, new_ref, new_sx, new_sy, mask):
     return Zmm2
 
 
+class ReconstructorV3pt5:
+    """Holds the needed metadata arrays and performs reconstruction of Zernike modes."""
 
-class Reconstructor:
+    def __init__(self, Zmm, ref, dark=None):
+        """Create a new reconstructor.  This is just a container for the state.
+
+        Make a new Reconstructor if you wish to update any of the arguments.
+        They do not store any history, unless you consider the chops history.  A
+        hot swap would have no ill effects.
+
+        Parameters
+        ----------
+        Zmm : `numpy.ndarray`
+            2500x17 array with modes as columns, flight "alignment"
+        ref : `numpy.ndarray`
+            reference image
+        dark : `numpy.ndarray`
+            dark frame, not used in this generation of estimator, but included
+            as a parameter for API compatibility
+
+        """
+        self.ref = ref
+        self.dark = dark
+        self.Zmm = Zmm
+        self.P, self.Q = assemble_reconstructor(Zmm, ref.ravel())
+
+    def estimate_raw(self, img):
+        """Perform reconstruction (estimation) on an image.
+
+        You should only call this function if you are interested in the flux mode.
+
+        The difference between it and estimate is that it returns the flux mode
+        coefficient and has no other options.
+
+        """
+        return reconstruct(img.ravel(), self.P, self.Q)
+
+    def estimate(self, img):
+        """Perform reconstruction (estimation) on an image.
+
+        Parameters
+        ----------
+        img : `numpy.ndarray`
+            ndarray of shape (MxN), right out of the camera
+
+        Returns
+        -------
+        `numpy.ndarray`
+            a vector of coefficients
+
+        """
+        coefs = reconstruct(img.ravel(), self.P, self.Q)
+        espilon_by_f = coefs[11]
+        # epsilon_by_f is the flux mode
+        coefs[:11] /= (1 + espilon_by_f)
+        return coefs
+
+    def vmag_normalize(self, new_ref):
+        """Perform vmag normalization.
+
+        Does not expose options for shear chop size, etc.  These could be added later.
+
+        Parameters
+        ----------
+        new_ref : `numpy.ndarray`
+            new reference frame
+
+        """
+        new_sy, new_sx = (synthesize_pupil_shear(new_ref, 0.038, a) for a in [0, 1])
+        mask = self.Zmm[:, 11] == 0
+        Zmm2 = vmag_normalize(self.Zmm, self.ref-self.dark, new_ref-self.dark, new_sx, new_sy, ~mask)
+        return self.__class__(Zmm2, new_ref, self.dark)
+
+
+class ReconstructorV2:
+    """Second generation reconstructor."""
+
+    def __init__(self, Zmm, ref, dark=None):
+        """Create a new reconstructor.  This is just a container for the state.
+
+        Make a new Reconstructor if you wish to update any of the arguments.
+        They do not store any history, unless you consider the chops history.  A
+        hot swap would have no ill effects.
+
+        Include the flux mode in the 12th (11th indexed) column, or don't.
+        The array is copied and the 12th mode is zeroed before Zmm is used.
+
+        Parameters
+        ----------
+        Zmm : `numpy.ndarray`
+            2500x17 array with modes as columns, flight "alignment"
+        ref : `numpy.ndarray`
+            reference image
+        dark : `numpy.ndarray`
+            dark frame, not used in this generation of estimator, but included
+            as a parameter for API compatibility
+
+        """
+        self.ref = ref
+        if dark is None:
+            dark = np.zeros_like(ref)
+
+        # kill the flux mode if it exists
+        Zmm = Zmm.copy()
+        Zmm[:, 11] = 0
+        self.Zmm = Zmm
+        self.ref = ref
+        self.dark = dark
+        self.P, self.Q = assemble_reconstructor(Zmm, ref.ravel(), dark.ravel())
+
+    def estimate(self, img):
+        """Perform reconstruction (estimation) on an image."""
+        return reconstruct(img.ravel(), self.P, self.Q)
+
+
+class ReconstructorV2pt5:
     """Second generation reconstructor, with flux mode."""
 
     def __init__(self, Zmm, ref, dark=None):
@@ -165,6 +280,41 @@ class Reconstructor:
         """Perform reconstruction (estimation) on an image."""
         return reconstruct(img.ravel(), self.P, self.Q)
 
+    def vmag_normalize(self, new_ref):
+        """Perform vmag normalization.
+
+        Does not expose options for shear chop size, etc.  These could be added later.
+
+        Parameters
+        ----------
+        new_ref : `numpy.ndarray`
+            new reference frame
+
+        """
+        new_sy, new_sx = (synthesize_pupil_shear(new_ref, 0.038, a) for a in [0, 1])
+        mask = self.Zmm[:, 11] == 0
+        Zmm2 = vmag_normalize(self.Zmm, self.ref-self.dark, new_ref-self.dark, new_sx, new_sy, ~mask)
+        return self.__class__(Zmm2, new_ref, self.dark)
+
+
+def build_mode(ref, chop):
+    """Build a mode according to E. Cady's Eq. (24) from lowfs_recon_v2.pdf.
+
+    Parameters
+    ----------
+    ref : `numpy.ndarray`
+        raw reference image, without mask applied or dark frame subtracted
+    chop : `numpy.ndarray`
+        chop with positive stimulus.  Raw image.
+
+    Returns
+    -------
+    `numpy.ndarray`
+        raveled ndarray after applying mask, shape of NxM - (NxM-sum(mask))
+
+    """
+    return chop - ref
+
 
 def assemble_reconstructor(Zmm, ref, dark):
     """Assemble a reconstruction P, Q from any number of modes.
@@ -191,10 +341,12 @@ def assemble_reconstructor(Zmm, ref, dark):
     ref = ref.ravel()
     dark = dark.ravel()
 
+    oldtype = Zmm.dtype
+    Zmm = Zmm.astype(np.float64)
     P = np.linalg.pinv(Zmm)
+    P = P.astype(oldtype)
     Q = -(P @ ref)
     return P, Q
-
 
 
 def synthesize_pupil_shear(ref, samples, axis=0, order=3):
@@ -218,11 +370,19 @@ def synthesize_pupil_shear(ref, samples, axis=0, order=3):
     """
     # there is a little gymnastics in this function to move a GPU array to CPU
     # and back for ndimage shift if needed
-    # not really needed anymore since cupy has ndimage, but not worth changing
     from scipy import ndimage
     if type(ref) != truenp.ndarray:
         ref = ref.get()
     shifts = [0, 0]
     shifts[axis] = samples
-    shifted = ndimage.shift(ref, shifts, order=3)  # no other args, same as WFSC repo
-    return np.array(shifted-ref)
+    shifts2 = [0, 0]
+    shifts2[axis] = -samples
+    # https://github.jpl.nasa.gov/WFIRST-CGI/cgisim-wrapper/blob/master/lowfsparam/lowfsparam.py#L220
+    shiftedup = ndimage.shift(ref, shifts, order=3)  # no other args, same as WFSC
+    shifteddown = ndimage.shift(ref, shifts2, order=3)  # no other args, same as WFSC
+    mode = (shiftedup - shifteddown)/(2*samples)
+    return np.asarray(mode)
+
+
+# alias newest to reconstructor
+Reconstructor = ReconstructorV2pt5

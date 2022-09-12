@@ -2,8 +2,6 @@
 from functools import partial
 from lowfsc.constants import BEAM_DIA_AT_DM1
 
-from astropy import units as u
-
 from prysm import (
     fttools,
     propagation,
@@ -18,14 +16,15 @@ LOCAM_IMAGE_SIZE = 50
 
 WF = propagation.Wavefront
 
-def forward_model_debug(wvl, data, zernikes=None, locam_misfocus=0, locam_shear=(0, 0)):
+
+def forward_model_debug(wvl, data, zernikes=None, locam_misfocus=0, locam_shear=(0, 0), hlc_crop=True):
     """Forward model of LOWFS with a few knobs to turn.
 
     Parameters
     ----------
-    wvl : `float`
+    wvl : float
         wavelength of light, microns
-    data : `data.DesignData`
+    data : data.DesignData
         object with properties of:
         roman_pupil - amplitude map of roman pupil
         dm1_wfe - phase map in nm from DM1
@@ -33,20 +32,23 @@ def forward_model_debug(wvl, data, zernikes=None, locam_misfocus=0, locam_shear=
         fpm - callable with a single argument of wavelength (in um) that produces
             a complex reflection map of the FPM
         pupil_mask - amplitude map of a pupil mask (i.e., for SPC)
-    zernikes : `ndarray`
+    zernikes : ndarray
         1D array of Zernike coefficients, must be same length as len(data.zern309)
-    locam_misfocus : `float`, optional
+    locam_misfocus : float, optional
         misfocus or misconjugation of the LOWFS camera, millimeters
-    locam_shear : tuple of `int`, `int`
+    locam_shear : tuple of int, int
         shear in x and y of the image on locam, in oversampled space.
         The model has 8x oversampling at locam, so locam_shear=(1,0) shears by
         1/8px on the output grid
+    hlc_crop : bool, optional
+        if True, crop the FoV at OAP6 to the LOCAM AoI
+        else leave at natural resolution (FoV determined by data.nmodel)
 
 
 
     Returns
     -------
-    `dict`
+    dict
         keys of optics, the actual optical planes
                 fields, the fields before and after interaction with each plane
 
@@ -77,7 +79,7 @@ def forward_model_debug(wvl, data, zernikes=None, locam_misfocus=0, locam_shear=
         disturbance = WF.from_amp_and_phase(roman_pupil, phs, wvl, data.dx_pup)
 
     # astf = Angular Spectrum Tansfer Function
-    if not wvl in data.astf_dm1_to_dm2:
+    if wvl not in data.astf_dm1_to_dm2:
         tf1to2 = propagation.angular_spectrum_transfer_function(data.nmodel, wvl, data.dx_pup, 1000)
         tf2to1 = propagation.angular_spectrum_transfer_function(data.nmodel, wvl, data.dx_pup, -1000)
         data.astf_dm1_to_dm2[wvl] = tf1to2
@@ -90,9 +92,9 @@ def forward_model_debug(wvl, data, zernikes=None, locam_misfocus=0, locam_shear=
         dm1 = WF.from_amp_and_phase(data.oNpup, dm1_wfe, wvl, data.dx_pup)
         dm2 = WF.from_amp_and_phase(data.oNpup, dm2_wfe, wvl, data.dx_pup)
         dm2.data = fttools.pad2d(dm2.data,
-            Q=data.nmodel/data.npup,
-            mode='constant',
-            value=dm2.data[0,0])
+                                 Q=data.nmodel/data.npup,
+                                 mode='constant',
+                                 value=dm2.data[0, 0])
 
     # ETL
     ############################################################################
@@ -105,9 +107,9 @@ def forward_model_debug(wvl, data, zernikes=None, locam_misfocus=0, locam_shear=
         field_after_dm1 = disturbance * dm1
 
         field_after_dm1.data = fttools.pad2d(field_after_dm1.data,
-            Q=data.nmodel/data.npup,
-            mode='constant',
-            value=field_after_dm1.data[0,0])
+                                             Q=data.nmodel/data.npup,
+                                             mode='constant',
+                                             value=field_after_dm1.data[0, 0])
 
         # propagate from DM1 to DM2 and apply the phase error
         field_at_dm2 = field_after_dm1.free_space(tf=tf1to2)
@@ -122,9 +124,9 @@ def forward_model_debug(wvl, data, zernikes=None, locam_misfocus=0, locam_shear=
         field_after_dm2 = None
         field_at_pupil = disturbance
         field_at_pupil.data = fttools.pad2d(field_at_pupil.data,
-            Q=data.nmodel/data.npup,
-            mode='constant',
-            value=field_at_pupil.data[0,0])
+                                            Q=data.nmodel/data.npup,
+                                            mode='constant',
+                                            value=field_at_pupil.data[0, 0])
 
     if data.pupil_mask is None:
         field_after_pupil = field_at_pupil
@@ -133,34 +135,14 @@ def forward_model_debug(wvl, data, zernikes=None, locam_misfocus=0, locam_shear=
 
     fno = 32.5676970504222  # TODO: error?  see constants.py, ~32.2?
     efl = BEAM_DIA_AT_DM1*fno
-    field_at_fpm = field_after_pupil.focus_fixed_sampling(
-        efl=efl,
-        dx=data.dx_fpm,
-        samples=data.fpm_samples)
+    field_at_oap6, field_at_fpm, field_after_fpm = \
+        field_after_pupil.to_fpm_and_back(efl, cmplx_fpm, data.dx_fpm, return_more=True)
 
-    field_after_fpm = field_at_fpm * cmplx_fpm
+    # eps = 1 - abs(cmplx_fpm[0, 0])**2
+    # field_at_oap6, field_at_fpm, field_after_fpm, _ = \
+        # field_after_pupil.babinet(efl, None, 1 - eps*cmplx_fpm, data.dx_fpm, return_more=True)
 
-    # vCDR => prysm020 change: previously, the pupil occupied 309/1024 px,
-    # it now occupies 309/512 px
     samples_inter_out = field_at_pupil.data.shape[0]
-    field_at_oap6 = field_after_fpm.unfocus_fixed_sampling(
-        efl=efl,
-        dx=data.dx_pup,
-        samples=samples_inter_out)
-
-    # scaling for mdft -- unclear why this is needed
-    # prysm unit test passes that idft == ifft
-    # and that idft2(dft2(x)) == x for any intermediate sizes
-    # somehow finding something outside the unit tests here
-    # unclear where factor of 16 even comes from.  May have to do with
-    # how normalization factor was baked into idft2
-    if which == 'HLC':
-        field_at_oap6.data /= 16
-    elif which == 'SPEC':
-        field_at_oap6.data /= 25
-    elif which == 'WFOV':
-        field_at_oap6.data /= 20
-
     if locam_misfocus != 0:
         field_after_oap6 = field_at_oap6.free_space(locam_misfocus, Q=2)
         low = samples_inter_out//4
@@ -172,10 +154,11 @@ def forward_model_debug(wvl, data, zernikes=None, locam_misfocus=0, locam_shear=
     if locam_shear[0] != 0:
         field_after_oap6.data = np.roll(field_after_oap6.data, locam_shear)
 
-    if which == 'HLC':
-        c = samples_inter_out//2
-        w = 200
-        field_after_oap6.data = field_after_oap6.data[c-w:c+w, c-w:c+w]
+    if 'HLC' in which:
+        if hlc_crop:
+            c = samples_inter_out//2
+            w = 200
+            field_after_oap6.data = field_after_oap6.data[c-w:c+w, c-w:c+w]
         # oversampled by 8x, 0.013 is pixel pitch of LOCAM in mm
         field_after_oap6.dx = 0.013/8
     else:
@@ -206,9 +189,9 @@ def forward_model(wvl, data, zernikes=None, locam_misfocus=0, locam_shear=(0, 0)
 
     Parameters
     ----------
-    wvl : `float`
+    wvl : float
         wavelength of light, microns
-    data : `data.DesignData`
+    data : data.DesignData
         object with properties of:
         roman_pupil - amplitude map of roman pupil
         dm1_wfe - phase map in nm from DM1
@@ -216,11 +199,11 @@ def forward_model(wvl, data, zernikes=None, locam_misfocus=0, locam_shear=(0, 0)
         fpm - callable with a single argument of wavelength (in um) that produces
             a complex reflection map of the FPM
         pupil_mask - amplitude map of a pupil mask (i.e., for SPC)
-    zernikes : `ndarray`
+    zernikes : ndarray
         1D array of Zernike coefficients, must be same length as len(data.zern309)
-    locam_misfocus : `float`, optional
+    locam_misfocus : float, optional
         misfocus or misconjugation of the LOWFS camera, millimeters
-    locam_shear : tuple of `int`, `int`
+    locam_shear : tuple of (int, int)
         shear in x and y of the image on locam, in oversampled space.
         The model has 8x oversampling at locam, so locam_shear=(1,0) shears by
         1/8px on the output grid
@@ -228,14 +211,15 @@ def forward_model(wvl, data, zernikes=None, locam_misfocus=0, locam_shear=(0, 0)
 
     Returns
     -------
-    `dict`
+    dict
         keys of optics, the actual optical planes
                 fields, the fields before and after interaction with each plane
+
     """
-    if data.which == 'HLC':
-        binfctr = 8 # 400/50
+    if 'HLC' in data.which:
+        binfctr = 8  # 400/50
     else:
-        binfctr = 26 # 1350/50
+        binfctr = 26  # 1350/50
 
     intermediate = forward_model_debug(wvl=wvl, data=data, zernikes=zernikes,
                                        locam_misfocus=locam_misfocus, locam_shear=locam_shear)
@@ -248,11 +232,11 @@ def polychromatic(wvls, weights, data, zernikes=None, locam_misfocus=0, locam_sh
 
     Parameters
     ----------
-    wvls : iterable of `float`
+    wvls : iterable of float
         wavelengths of light, microns
-    weights : iterable of `float`
-        weights to apply to the data
-    data : `data.DesignData`
+    weights : iterable of float
+        spectral weights to apply to the data
+    data : data.DesignData
         object with properties of:
         roman_pupil - amplitude map of roman pupil
         dm1_wfe - phase map in nm from DM1
@@ -260,15 +244,15 @@ def polychromatic(wvls, weights, data, zernikes=None, locam_misfocus=0, locam_sh
         fpm - callable with a single argument of wavelength (in um) that produces
             a complex reflection map of the FPM
         pupil_mask - amplitude map of a pupil mask (i.e., for SPC)
-    zernikes : `dict` or `iterable`
-        input to NollZernike class with norm=True
-    locam_misfocus : `float`, optional
+    zernikes : ndarray
+        vector of Zernike coefficients, same length as dd.seed_zernikes
+    locam_misfocus : float, optional
         misfocus or misconjugation of the LOWFS camera, millimeters
-    locam_shear : tuple of `int`, `int`
+    locam_shear : tuple of (int, int)
         shear in x and y of the image on locam, in oversampled space.
         The model has 8x oversampling at locam, so locam_shear=(1,0) shears by
         1/8px on the output grid
-    pool : `mapper`
+    pool : mapper
         a type which has a map method, multiprocessing thread and process pools
         work, as do concurrent futures equivalents
 
@@ -277,12 +261,13 @@ def polychromatic(wvls, weights, data, zernikes=None, locam_misfocus=0, locam_sh
     if pool is None:
         out = [f(wvl) for wvl in wvls]
     else:
-        out = list(pool.map(f, wvls)) # list exhausts the generator
+        out = list(pool.map(f, wvls))  # list exhausts the generator
 
-    out = np.array(out)
+    out = np.asarray(out)
 
     # looks weird, just better wrapper for tensordot
     return polynomials.sum_of_2d_modes(out, weights)
+
 
 def smear(inp, cam):
     smearperline = (cam.frame_time - cam.exposure_time) / \
@@ -290,43 +275,11 @@ def smear(inp, cam):
     # for 50 rows, there are 49 "in-between" states;
     # when multiplied by exp_time, real max exposure is frame_time
     out = inp.copy()
-    for irow in range(1,inp.shape[0]): # don't smear at 0 shift
+    for irow in range(1, inp.shape[0]):  # don't smear at 0 shift
         out[:-irow] += inp[irow:] * smearperline
     return out
+
 
 def polysmear(wvls, weights, data, cam, **kwargs):
     imnosmear = polychromatic(wvls, weights, data, **kwargs)
     return smear(imnosmear, cam)
-
-def chop(wvls, weights, data, ref, zernikes=None, locam_misfocus=0):
-    """Chopping model, returns *differential* images for each term in Zernikes.
-
-    Parameters
-    ----------
-    wvls : iterable of `float`
-        wavelengths of light, microns
-    weights : iterable of `float`
-        weights to apply to the data
-    data : `data.DesignData`
-        object with properties of:
-        roman_pupil - amplitude map of roman pupil
-        dm1_wfe - phase map in nm from DM1
-        dm2_wfe - phase map in nm from DM2
-        fpm - callable with a single argument of wavelength (in um) that produces
-            a complex reflection map of the FPM
-        pupil_mask - amplitude map of a pupil mask (i.e., for SPC)
-    ref : `numpy.ndarray`
-        reference frame
-    zernikes : `iterable` of `dicts`
-        sequence of chop parameters, e.g. [{'Z2': 1}, {'Z3': 1}] to chop
-        Z2 and Z3 with zero values for other modes
-    locam_misfocus : `float`, optional
-        misfocus or misconjugation of the LOWFS camera, millimeters
-
-    """
-    out = []
-    for d in zernikes:
-        aimg = polychromatic(wvls, weights, data, d, locam_misfocus=locam_misfocus)
-        out.append(aimg-ref)
-
-    return out

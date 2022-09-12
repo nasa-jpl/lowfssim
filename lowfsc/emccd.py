@@ -1,6 +1,6 @@
 """Rudimentary model of an EMCCD."""
 
-from prysm.mathops import   np
+from prysm.mathops import np
 # this file is used to supplant emccd_detect.  The motivation for its existence
 # is that it would take 5 hours of compute time to synthesize a chopping dataset
 # for LOWFSC, which is unbearably long.  This file is 500 to 500k times faster
@@ -14,24 +14,24 @@ from prysm.mathops import   np
 np.random.seed(0x434749)
 
 
-def render_columnar_fpn(img_size, ncols, height, dtype=None):
+def render_columnwise_fpn(img_size, ncols, height, dtype=None):
     """Render per-column fixed pattern noise.
 
     Parameters
     ----------
-    img_size : `int` or `tuple` of `int`
+    img_size : int or tuple of int
         size of the image, (img_size,img_size) px, or img_size if img_size is already a tuple
         e.g., 50 => (50,50) or (25,50) => (25,50)
-    ncols : `int`
+    ncols : int
         number of columns to make noisy
-    height : `float`
+    height : float
         "height" of the FPN; same units as the image it will be added to (likely DN).
     dtype : numpy datatype, optional
         a dtype like np.float64 or np.float32.  Same default as numpy (float64) if not given.
 
     Returns
     -------
-    `numpy.ndarray`
+    numpy.ndarray
         ndarray containing fixed pattern noise.
 
     """
@@ -56,19 +56,19 @@ def render_rowwise_fpn(img_size, nrows, height, dtype=None):
 
     Parameters
     ----------
-    img_size : `int` or `tuple` of `int`
+    img_size : int or tuple of int
         size of the image, (img_size,img_size) px, or img_size if img_size is already a tuple
         e.g., 50 => (50,50) or (25,50) => (25,50)
-    ncols : `int`
+    ncols : int
         number of columns to make noisy
-    height : `float`
+    height : float
         "height" of the FPN; same units as the image it will be added to (likely DN).
     dtype : numpy datatype, optional
         a dtype like np.float64 or np.float32.  Same default as numpy (float64) if not given.
 
     Returns
     -------
-    `numpy.ndarray`
+    numpy.ndarray
         ndarray containing fixed pattern noise.
 
     """
@@ -92,14 +92,14 @@ def apply_lut(img, lut):
 
     Parameters
     ----------
-    img : `numpy.ndarray`
+    img : numpy.ndarray
         n dimensional array (2D and 3D are both OK) of an unsigned integer dtype
-    lut : `numpy.ndarray`
+    lut : numpy.ndarray
         1 dimensional array whose indices are input values and values are output values
 
     Returns
     -------
-    `numpy.ndarray`
+    numpy.ndarray
         ndarray of the same shape as img
         the output array must not be modified in place, or lut will be modified as well.
 
@@ -118,27 +118,27 @@ class EMCCD:
 
         Parameters
         ----------
-        dark_current : `float`
+        dark_current : float
             dark current rate, e-/sec
-        cic : `float`
-            clock induced charge, e-/frame
-        read_noise : `float`
+        cic : float
+            clock induced charge, e-/px/frame
+        read_noise : float
             read noise, output e- (after EM gain)
-        bias : `float`
+        bias : float
             bias, output e- (after EM gain)
-        em_gain : `float`
+        em_gain : float
             em gain (x, multiplier)
-        fwc : `float`
+        fwc : float
             full-well capacity, e- (after EM gain)
-        conversion_gain : `float`
+        conversion_gain : float
             e- per ADU or DN
-        bits : `int`
+        bits : int
             bit depth of the camera
-        exposure_time : `float`
+        exposure_time : float
             integration time, sec
-        frame_time : `float`
+        frame_time : float
             total time for 1 frame, sec
-        nonlinear_lut : `numpy.ndarray`, optional
+        nonlinear_lut : numpy.ndarray, optional
             a 1D lookup table containing the camera nonlinear response
             indices of the array are the input pixel values and values
             are the output values.
@@ -164,17 +164,17 @@ class EMCCD:
 
         Parameters
         ----------
-        flux_map : `numpy.ndarray`
+        flux_map : numpy.ndarray
             ndarray which has units of e-/sec, must include any desired QE of
             the camera
-        frames : `int`
+        frames : int
             number of frames of data to synthesize.  Beware that large numbers
             for a large flux map size may cause an out of memory error.  Consider
             batching if your output would exceed ~125M values.
 
         Returns
         -------
-        `numpy.ndarray`
+        numpy.ndarray
             ndarray of shape (frames, *flux_map.shape)
             if frames=1, the first dim is squeezed off
             dtype=uint16, if nbits <= 16, uint32 if nbits <= 32, else uint64.
@@ -256,25 +256,25 @@ class sCMOS:
 
         Parameters
         ----------
-        dark_current : `float`
+        dark_current : float
             dark current rate, e-/sec
-        cic : `float`
+        cic : float
             clock induced charge, e-/frame
-        read_noise : `float`
+        read_noise : float
             read noise, output e- (after EM gain)
-        bias : `float`
+        bias : float
             bias, output e- (after EM gain)
-        em_gain : `float`
+        em_gain : float
             em gain (x, multiplier)
-        fwc : `float`
+        fwc : float
             full-well capacity, e- (after EM gain)
-        conversion_gain : `float`
+        conversion_gain : float
             e- per ADU or DN
-        bits : `int`
+        bits : int
             bit depth of the camera
-        exposure_time : `float`
+        exposure_time : float
             integration time, sec
-        nonlinear_lut : `numpy.ndarray`, optional
+        nonlinear_lut : numpy.ndarray, optional
             a 1D lookup table containing the camera nonlinear response
             indices of the array are the input pixel values and values
             are the output values.
@@ -297,17 +297,17 @@ class sCMOS:
 
         Parameters
         ----------
-        flux_map : `numpy.ndarray`
+        flux_map : numpy.ndarray
             ndarray which has units of e-/sec, must include any desired QE of
             the camera
-        frames : `int`
+        frames : int
             number of frames of data to synthesize.  Beware that large numbers
             for a large flux map size may cause an out of memory error.  Consider
             batching if your output would exceed ~125M values.
 
         Returns
         -------
-        `numpy.ndarray`
+        numpy.ndarray
             ndarray of shape (frames, *flux_map.shape)
             if frames=1, the first dim is squeezed off
             dtype=uint16, if nbits <= 16, uint32 if nbits <= 32, else uint64.
