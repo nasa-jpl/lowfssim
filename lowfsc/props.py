@@ -60,7 +60,6 @@ def forward_model_debug(wvl, data, zernikes=None, locam_misfocus=0, locam_shear=
     dm1_wfe = data.dm1_wfe
     dm2_wfe = data.dm2_wfe
     dNpup = data.dNpup
-    which = data.which
     cmplx_fpm = data.fpm(wvl)
 
     if zernikes is not None:
@@ -154,16 +153,12 @@ def forward_model_debug(wvl, data, zernikes=None, locam_misfocus=0, locam_shear=
     if locam_shear[0] != 0:
         field_after_oap6.data = np.roll(field_after_oap6.data, locam_shear)
 
-    if 'HLC' in which:
-        if hlc_crop:
-            c = samples_inter_out//2
-            w = 200
-            field_after_oap6.data = field_after_oap6.data[c-w:c+w, c-w:c+w]
-        # oversampled by 8x, 0.013 is pixel pitch of LOCAM in mm
-        field_after_oap6.dx = 0.013/8
-    else:
-        # oversampled by 26x
-        field_after_oap6.dx = 0.013/26
+    if hlc_crop:
+        c = samples_inter_out//2
+        w = 200
+        field_after_oap6.data = field_after_oap6.data[c-w:c+w, c-w:c+w]
+
+    field_after_oap6.dx = 0.013 / data.bin_factor
 
     # PROPS
     ############################################################################
@@ -216,13 +211,10 @@ def forward_model(wvl, data, zernikes=None, locam_misfocus=0, locam_shear=(0, 0)
                 fields, the fields before and after interaction with each plane
 
     """
-    if 'HLC' in data.which:
-        binfctr = 8  # 400/50
-    else:
-        binfctr = 26  # 1350/50
-
+    binfctr = data.bin_factor
     intermediate = forward_model_debug(wvl=wvl, data=data, zernikes=zernikes,
                                        locam_misfocus=locam_misfocus, locam_shear=locam_shear)
+
     data = intermediate['fields']['oap6'][1].intensity.data
     return detector.bindown(data, binfctr, mode='sum')
 

@@ -699,7 +699,7 @@ def aj_contributed_dual_occulter(wavelength, data_root, sn, spot_depth, fpm_samp
 class DesignData():
     """A class which prevents you from having to go to disk to get an array."""
 
-    def __init__(self, roman_pupil, dm1_wfe, dm2_wfe, dx_pup, npup, nmodel, prop_dms, fpm, fpm_dx, fpm_samples, which, pupil_mask=None):
+    def __init__(self, roman_pupil, dm1_wfe, dm2_wfe, dx_pup, npup, nmodel, prop_dms, fpm, fpm_dx, fpm_samples, bin_factor=None, pupil_mask=None):
         """Create a new DesignData instance.
 
         Parameters
@@ -730,6 +730,8 @@ class DesignData():
         which : str
             either HLC or SPC, specifies which model to run
             The models have different sampling, so this flag is needed
+        bin_factor : int
+            integer number of samples to bin to produce final detector image
         pupil_mask : numpy.ndarray
             ndarray of any pupil plane mask (excluding the roman pupil) to be
             applied before propagating to the FPM
@@ -762,7 +764,8 @@ class DesignData():
         self.npup = npup
         self.nmodel = nmodel
         self.prop_dms = prop_dms
-        self.which = which
+        self.bin_factor = bin_factor
+
 
         self.xNpup, self.yNpup = coordinates.make_xy_grid(npup, dx=dx_pup)
         self.rNpup, self.tNpup = coordinates.cart_to_polar(self.xNpup, self.yNpup)
@@ -900,7 +903,7 @@ class DesignData():
                    # magic number - from FITS file provided by A.J.
                    fpm_dx=fpm_dx,
                    fpm_samples=fpm_fov,
-                   which='HLC',
+                   bin_factor=8,
                    pupil_mask=pupil_mask)
 
     @classmethod
@@ -1039,7 +1042,7 @@ class DesignData():
                    # magic number - from FITS file provided by A.J.
                    fpm_dx=fpm_dx,
                    fpm_samples=fpm_fov,
-                   which='HLC',
+                   bin_factor=8,
                    pupil_mask=pupil_mask)
 
     @classmethod
@@ -1130,7 +1133,7 @@ class DesignData():
                           fpm=fpm,
                           fpm_dx=ss,
                           fpm_samples=fpm_fov,
-                          which='SPEC',
+                          bin_factor=26,
                           pupil_mask=pupil_mask)
 
     @classmethod
@@ -1189,7 +1192,7 @@ class DesignData():
                           fpm=fpm,
                           fpm_dx=ss,
                           fpm_samples=fpm_fov,
-                          which='WFOV',
+                          bin_factor=26,
                           pupil_mask=pupil_mask)
 
     @classmethod
@@ -1238,7 +1241,7 @@ class DesignData():
         return DesignData(roman_pupil=roman_pupil,
                           dm1_wfe=None,
                           dm2_wfe=None,
-                          fpm=fpm, fpm_dx=ss,
+                          fpm=fpm, fpm_dx=ss, bin_factor=26,
                           pupil_mask=pupil_mask)
 
 
