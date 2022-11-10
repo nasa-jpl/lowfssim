@@ -1,6 +1,7 @@
 """Automatic routines for performing certain operations."""
 from collections import defaultdict
 from pathlib import Path
+import warnings
 
 import numpy as truenp
 
@@ -26,10 +27,15 @@ keys_modes = ['Z2', 'Z3', 'Z4', 'Z5', 'Z6', 'Z7', 'Z8', 'Z9', 'Z10', 'Z11', 'Sx'
 keys = ['na', 'Z2', 'Z3', 'Z4', 'Z5', 'Z6', 'Z7', 'Z8', 'Z9', 'Z10', 'Z11', 'F1', 'Sx', 'Sy', 'na', 'N', r'$\sum I$']
 
 
-DEFAULT_ROOT = (Path(__file__).parent/'data').expanduser().absolute()
+DEFAULT_ROOT = (Path(__file__).parent.parent/'data').expanduser().absolute()
 
-default_sd = StellarDatabase.bijan_data(DEFAULT_ROOT)
-default_td = ThroughputDatabase.bijan_data(DEFAULT_ROOT)
+try:
+    default_sd = StellarDatabase.bijan_data(DEFAULT_ROOT)
+    default_td = ThroughputDatabase.bijan_data(DEFAULT_ROOT)
+except FileNotFoundError:
+    warnings.warn('data files not found at default location; some automated routines will require StellarDatabase and ThroughputDatabase be passed explicitly')
+    default_sd = None
+    default_td = None
 
 
 def chop_bipolar(wvl, weights, design_data, ref_z, chop_zs, cam=None, nframes_avg=10_000):
